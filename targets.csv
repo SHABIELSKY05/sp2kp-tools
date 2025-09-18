@@ -1,6 +1,6 @@
 # province_code,regency_code
-32,        # Jawa Barat (level provinsi)
-32,3273    # Kota Bandung
-32,3271    # Kota Bogor
-31,        # DKI Jakarta (level provinsi)
-12,1271    # Kota Medan (contoh)
+32,
+32,3273
+32,3271
+31,
+12,1271
