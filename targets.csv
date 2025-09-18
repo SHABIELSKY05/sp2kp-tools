@@ -1,7 +1,8 @@
 # province_code,regency_code
 
 # ===== Aceh (11) =====
-11,      
+11,            # <-- hapus baris ini jika tak butuh level provinsi
+
 # Kab. Aceh Tengah
 11,1104
 # Kab. Aceh Barat
@@ -15,7 +16,7 @@
 
 
 # ===== Sumatera Utara (12) =====
-12,         
+12,            # <-- hapus baris ini jika tak butuh level provinsi
 
 # Kab. Karo
 12,1206
