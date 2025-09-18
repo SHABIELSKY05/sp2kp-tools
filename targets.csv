@@ -1,6 +1,35 @@
-11,        # Aceh 
-11,1104    # Kab. Aceh Tengah
-11,1105    # Kab. Aceh Barat
-11,1116    # Kab. Aceh Tamiang
-11,1171    # Kota Banda Aceh
-11,1173    # Kota Lhokseumawe
+# province_code,regency_code
+
+# ===== Aceh (11) =====
+11,      
+# Kab. Aceh Tengah
+11,1104
+# Kab. Aceh Barat
+11,1105
+# Kab. Aceh Tamiang
+11,1116
+# Kota Banda Aceh
+11,1171
+# Kota Lhokseumawe
+11,1173
+
+
+# ===== Sumatera Utara (12) =====
+12,         
+
+# Kab. Karo
+12,1206
+# Kab. Deli Serdang
+12,1207
+# Kab. Labuhanbatu
+12,1210
+# Kota Medan
+12,1271
+# Kota Pematangsiantar
+12,1272
+# Kota Sibolga
+12,1273
+# Kota Padang Sidempuan
+12,1277
+# Kota Gunungsitoli
+12,1278
