@@ -1,96 +1,188 @@
 name: fetch-sp2kp
+
 on:
   workflow_dispatch:
     inputs:
-      date:
+      tanggal:
         description: 'Tanggal (YYYY-MM-DD). Kosongkan = hari ini (UTC)'
         required: false
-      compare_date:
+      tanggal_pembanding:
         description: 'Tanggal pembanding (YYYY-MM-DD). Kosongkan = 30 hari sebelumnya'
         required: false
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - name: Install tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
-
-      - name: Fetch SP2KP and build CSV
-        env:
-          DATE: ${{ github.event.inputs.date }}
-          COMPARE_DATE: ${{ github.event.inputs.compare_date }}
+      - name: Set dates (today & compare -30)
+        id: setdates
+        shell: bash
         run: |
           set -euo pipefail
-          DATE="${DATE:-$(date -u +%F)}"
-          COMPARE_DATE="${COMPARE_DATE:-$(date -u -d '30 days ago' +%F)}"
+          T="${{ github.event.inputs.tanggal }}"
+          C="${{ github.event.inputs.tanggal_pembanding }}"
+          if [ -z "${T:-}" ]; then T="$(date -u +%F)"; fi
+          if [ -z "${C:-}" ]; then C="$(date -u -d "$T -30 days" +%F)"; fi
+          echo "TANGGAL=$T"            >> $GITHUB_ENV
+          echo "TANGGAL_PEMBANDING=$C" >> $GITHUB_ENV
+          echo "Tanggal: $T  |  Pembanding: $C"
 
-          echo "Ambil data untuk DATE=$DATE  COMPARE_DATE=$COMPARE_DATE"
-          mkdir -p out/raw
-          CSV="out/prices_${DATE}.csv"
+      - name: Install curl, jq, Python & pandas
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl jq python3 python3-pip
+          pip3 install -q pandas
+
+      - name: Fetch prices from SP2KP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          T="$TANGGAL"
+          C="$TANGGAL_PEMBANDING"
+          OUT="prices_${T}.csv"
 
           # Header CSV
-          echo 'province_code,province_name,regency_code,regency_name,tanggal,harga,tanggal_pembanding,harga_pembanding,delta_harga,persen_perubahan,status_perubahan,variant_id,variant_nama,satuan_display' > "$CSV"
+          echo 'province_code,province_name,regency_code,regency_name,tanggal,harga,tanggal_pembanding,harga_pembanding,delta_harga,persen_perubahan,status_perubahan,variant_id,variant_nama,satuan_display' > "$OUT"
 
-          # Lewati header targets.csv (mulai baris ke-2)
-          tail -n +2 targets.csv | while IFS=, read -r PROV_CODE PROV_NAME REGENCY_CODE REGENCY_NAME; do
-            PROV_CODE=$(echo "${PROV_CODE:-}" | xargs)
-            PROV_NAME=$(echo "${PROV_NAME:-}" | xargs)
-            REGENCY_CODE=$(echo "${REGENCY_CODE:-}" | xargs)
-            REGENCY_NAME=$(echo "${REGENCY_NAME:-}" | xargs)
+          API='https://api-sp2kp.kemendag.go.id/report/api/average-price/generate-perbandingan-harga'
+          ORI='https://sp2kp.kemendag.go.id'
+          REF='https://sp2kp.kemendag.go.id/'
 
+          # Pastikan file targets.csv ada
+          test -f targets.csv
+
+          # Baca tiap baris (skip header)
+          tail -n +2 targets.csv | tr -d '\r' | while IFS=',' read -r PROV_CODE PROV_NAME REGENCY_CODE REGENCY_NAME; do
             # Skip baris kosong
-            [ -z "$PROV_CODE" ] && continue
+            [ -z "${PROV_CODE// }" ] && continue
 
-            if [ -z "$REGENCY_CODE" ]; then
-              CODE_FIELD="kode_provinsi"
-              CODE_VALUE="$PROV_CODE"
-              TAG="prov"
+            # Build form-data (provinsi wajib, kab/kota opsional)
+            if [ -n "${REGENCY_CODE// }" ]; then
+              EXTRA=(-F "kode_kab_kota=${REGENCY_CODE}")
             else
-              CODE_FIELD="kode_kab_kota"
-              CODE_VALUE="$REGENCY_CODE"
-              TAG="kabkota"
+              EXTRA=()
             fi
 
-            DEST="out/raw/${TAG}_${PROV_CODE}_${REGENCY_CODE:-00}.json"
-            echo "→ $TAG $PROV_CODE ${REGENCY_CODE:-''} ($PROV_NAME ${REGENCY_NAME:-''})"
+            # Panggil API
+            RESP=$(curl -sS --max-time 25 \
+              -H 'Accept: application/json' \
+              -H "Origin: ${ORI}" \
+              -H "Referer: ${REF}" \
+              -F "tanggal=${T}" \
+              -F "tanggal_pembanding=${C}" \
+              -F "kode_provinsi=${PROV_CODE}" \
+              "${EXTRA[@]}" \
+              "$API" || true)
 
-            # Hit endpoint "perbandingan harga"
-            RESP=$(curl -sS --max-time 30 \
-              -H 'Origin: https://sp2kp.kemendag.go.id' \
-              -H 'Referer: https://sp2kp.kemendag.go.id/' \
-              -F "tanggal=$DATE" \
-              -F "tanggal_pembanding=$COMPARE_DATE" \
-              -F "$CODE_FIELD=$CODE_VALUE" \
-              'https://api-sp2kp.kemendag.go.id/report/api/average-price/generate-perbandingan-harga' \
-            ) || true
+            # Validasi minimal
+            if ! jq -e '.status?=="success"' >/dev/null 2>&1 <<<"$RESP"; then
+              echo "WARN: gagal untuk ${PROV_CODE}/${REGENCY_CODE:-''}" >&2
+              continue
+            fi
 
-            # Simpan raw JSON
-            echo "${RESP:-{}}" > "$DEST"
-
-            # Ekstrak ke CSV (kalau data ada)
-            echo "$RESP" | jq -r \
-              --arg pc "$PROV_CODE" --arg pn "$PROV_NAME" \
-              --arg rc "${REGENCY_CODE:-}" --arg rn "${REGENCY_NAME:-}" '
-              .data // [] | .[] |
-              [
+            # Tulis baris CSV
+            jq -r --arg pc "$PROV_CODE" --arg pn "$PROV_NAME" --arg rc "${REGENCY_CODE:-}" --arg rn "${REGENCY_NAME:-}" '
+              .data[]? | [
                 $pc, $pn, $rc, $rn,
-                .tanggal, .harga,
-                .tanggal_pembanding, .harga_pembanding,
-                .delta_harga, .persen_perubahan, .status_perubahan,
-                .variant_id, .variant_nama, .satuan_display
-              ] | @csv
-            ' >> "$CSV"
+                (.tanggal // ""),
+                (.harga // 0),
+                (.tanggal_pembanding // ""),
+                (.harga_pembanding // 0),
+                (.delta_harga // 0),
+                (.persen_perubahan // 0),
+                (.status_perubahan // ""),
+                (.variant_id // null),
+                (.variant_nama // ""),
+                (.satuan_display // "")
+              ] | @csv' <<<"$RESP" >> "$OUT"
+
+            # Jeda kecil agar sopan
+            sleep 0.2
           done
 
-          echo "Selesai. File gabungan: $CSV"
+          echo "Saved: $OUT"
+          test -s "$OUT"
 
-      - name: Upload artifacts
+      - name: Build leaders (top prov & city per commodity)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - << 'PY'
+          import pandas as pd, glob, numpy as np, os
+
+          fn = sorted(glob.glob("prices_*.csv"))[-1]
+          df = pd.read_csv(fn)
+
+          # Pastikan numeric
+          for c in ["persen_perubahan","delta_harga","harga","harga_pembanding"]:
+              if c in df.columns:
+                  df[c] = pd.to_numeric(df[c], errors="coerce")
+
+          # ----- Top PROVINCE per komoditas -----
+          prov = df[df["regency_code"].isna() | (df["regency_code"].astype(str).str.strip()=="")].copy()
+          prov = prov.dropna(subset=["persen_perubahan"])
+          if not prov.empty:
+              prov_idx = prov.groupby("variant_nama")["persen_perubahan"].apply(lambda s: s.abs().idxmax())
+              top_prov = prov.loc[prov_idx].set_index("variant_nama")
+          else:
+              top_prov = pd.DataFrame().set_index(pd.Index([], name="variant_nama"))
+
+          # ----- Top CITY/KAB per komoditas -----
+          city = df[df["regency_code"].astype(str).str.strip()!=""].copy()
+          city = city.dropna(subset=["persen_perubahan"])
+          if not city.empty:
+              city_idx = city.groupby("variant_nama")["persen_perubahan"].apply(lambda s: s.abs().idxmax())
+              top_city = city.loc[city_idx].set_index("variant_nama")
+          else:
+              top_city = pd.DataFrame().set_index(pd.Index([], name="variant_nama"))
+
+          # Gabungkan
+          variants = sorted(set(df["variant_nama"].dropna()))
+          rows = []
+          for v in variants:
+              row = {"variant": v}
+              if v in top_prov.index:
+                  rp = top_prov.loc[v]
+                  row.update({
+                      "top_province": rp.get("province_name"),
+                      "prov_percent_change": rp.get("persen_perubahan"),
+                      "prov_delta": rp.get("delta_harga"),
+                      "prov_date": rp.get("tanggal"),
+                  })
+              if v in top_city.index:
+                  rc = top_city.loc[v]
+                  row.update({
+                      "top_city": rc.get("regency_name"),
+                      "city_province": rc.get("province_name"),
+                      "city_percent_change": rc.get("persen_perubahan"),
+                      "city_delta": rc.get("delta_harga"),
+                      "city_date": rc.get("tanggal"),
+                  })
+              rows.append(row)
+
+          out = pd.DataFrame(rows)
+
+          # Urutkan: dampak provinsi terbesar (abs)
+          if "prov_percent_change" in out.columns:
+              out = out.sort_values(by="prov_percent_change", key=lambda s: s.abs(), ascending=False)
+
+          tag = fn.split("prices_")[-1].split(".csv")[0]
+          out_fn = f"leaders_{tag}.csv"
+          out.to_csv(out_fn, index=False)
+          print(f"Wrote {out_fn} (rows={len(out)})")
+          PY
+
+      - name: Upload CSV artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: prices-${{ github.run_number }}
-          path: out/
+          name: sp2kp-csv-${{ github.run_id }}
+          path: |
+            prices_*.csv
+            leaders_*.csv
+          retention-days: 7
