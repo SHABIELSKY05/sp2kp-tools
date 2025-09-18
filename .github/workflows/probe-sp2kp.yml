@@ -1,0 +1,19 @@
+name: probe-sp2kp
+on: workflow_dispatch
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test reachability
+        run: |
+          set -euxo pipefail
+          echo "Ping website (robots.txt)..."
+          curl -I --max-time 15 https://sp2kp.kemendag.go.id/robots.txt || true
+          echo "Ping API provinsi..."
+          curl -sS --max-time 20 \
+            -H 'Origin: https://sp2kp.kemendag.go.id' \
+            -H 'Referer: https://sp2kp.kemendag.go.id/' \
+            'https://api-sp2kp.kemendag.go.id/master/api/wilayah/provinsi?is_ihk2024=true' \
+            | head -c 500 || true
