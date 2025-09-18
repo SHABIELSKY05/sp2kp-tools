@@ -1,36 +1,16 @@
-# province_code,regency_code
-
-# ===== Aceh (11) =====
-11,            # <-- hapus baris ini jika tak butuh level provinsi
-
-# Kab. Aceh Tengah
-11,1104
-# Kab. Aceh Barat
-11,1105
-# Kab. Aceh Tamiang
-11,1116
-# Kota Banda Aceh
-11,1171
-# Kota Lhokseumawe
-11,1173
-
-
-# ===== Sumatera Utara (12) =====
-12,            # <-- hapus baris ini jika tak butuh level provinsi
-
-# Kab. Karo
-12,1206
-# Kab. Deli Serdang
-12,1207
-# Kab. Labuhanbatu
-12,1210
-# Kota Medan
-12,1271
-# Kota Pematangsiantar
-12,1272
-# Kota Sibolga
-12,1273
-# Kota Padang Sidempuan
-12,1277
-# Kota Gunungsitoli
-12,1278
+province_code,province_name,regency_code,regency_name
+11,Aceh,,
+11,Aceh,1104,Kab. Aceh Tengah
+11,Aceh,1105,Kab. Aceh Barat
+11,Aceh,1116,Kab. Aceh Tamiang
+11,Aceh,1171,Kota Banda Aceh
+11,Aceh,1173,Kota Lhokseumawe
+12,Sumatera Utara,,
+12,Sumatera Utara,1206,Kab. Karo
+12,Sumatera Utara,1207,Kab. Deli Serdang
+12,Sumatera Utara,1210,Kab. Labuhanbatu
+12,Sumatera Utara,1271,Kota Medan
+12,Sumatera Utara,1272,Kota Pematangsiantar
+12,Sumatera Utara,1273,Kota Sibolga
+12,Sumatera Utara,1277,Kota Padang Sidempuan
+12,Sumatera Utara,1278,Kota Gunungsitoli
