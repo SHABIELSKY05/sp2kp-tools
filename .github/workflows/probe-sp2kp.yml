@@ -6,14 +6,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Test reachability
         run: |
           set -euxo pipefail
-          echo "Ping website (robots.txt)..."
-          curl -I --max-time 15 https://sp2kp.kemendag.go.id/robots.txt || true
-          echo "Ping API provinsi..."
-          curl -sS --max-time 20 \
+          echo "=== Probe SP2KP from GitHub Actions runner ==="
+
+          echo -n "robots.txt            -> "
+          curl -sS -o /dev/null -w '%{http_code}\n' --max-time 15 \
+            https://sp2kp.kemendag.go.id/robots.txt || echo TIMEOUT
+
+          echo -n "API provinsi          -> "
+          curl -sS -o /dev/null -w '%{http_code}\n' --max-time 20 \
             -H 'Origin: https://sp2kp.kemendag.go.id' \
             -H 'Referer: https://sp2kp.kemendag.go.id/' \
-            'https://api-sp2kp.kemendag.go.id/master/api/wilayah/provinsi?is_ihk2024=true' \
-            | head -c 500 || true
+            'https://api-sp2kp.kemendag.go.id/master/api/wilayah/provinsi?is_ihk2024=true' || echo TIMEOUT
+
+          echo -n "API kab/kota (Jabar)  -> "
+          curl -sS -o /dev/null -w '%{http_code}\n' --max-time 20 \
+            -H 'Origin: https://sp2kp.kemendag.go.id' \
+            -H 'Referer: https://sp2kp.kemendag.go.id/' \
+            'https://api-sp2kp.kemendag.go.id/master/api/wilayah/kab-kota/32?is_ihk2024=true' || echo TIMEOUT
