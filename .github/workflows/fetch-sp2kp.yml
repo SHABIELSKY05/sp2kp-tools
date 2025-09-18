@@ -1,0 +1,96 @@
+name: fetch-sp2kp
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Tanggal (YYYY-MM-DD). Kosongkan = hari ini (UTC)'
+        required: false
+      compare_date:
+        description: 'Tanggal pembanding (YYYY-MM-DD). Kosongkan = 30 hari sebelumnya'
+        required: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Fetch SP2KP and build CSV
+        env:
+          DATE: ${{ github.event.inputs.date }}
+          COMPARE_DATE: ${{ github.event.inputs.compare_date }}
+        run: |
+          set -euo pipefail
+          DATE="${DATE:-$(date -u +%F)}"
+          COMPARE_DATE="${COMPARE_DATE:-$(date -u -d '30 days ago' +%F)}"
+
+          echo "Ambil data untuk DATE=$DATE  COMPARE_DATE=$COMPARE_DATE"
+          mkdir -p out/raw
+          CSV="out/prices_${DATE}.csv"
+
+          # Header CSV
+          echo 'province_code,province_name,regency_code,regency_name,tanggal,harga,tanggal_pembanding,harga_pembanding,delta_harga,persen_perubahan,status_perubahan,variant_id,variant_nama,satuan_display' > "$CSV"
+
+          # Lewati header targets.csv (mulai baris ke-2)
+          tail -n +2 targets.csv | while IFS=, read -r PROV_CODE PROV_NAME REGENCY_CODE REGENCY_NAME; do
+            PROV_CODE=$(echo "${PROV_CODE:-}" | xargs)
+            PROV_NAME=$(echo "${PROV_NAME:-}" | xargs)
+            REGENCY_CODE=$(echo "${REGENCY_CODE:-}" | xargs)
+            REGENCY_NAME=$(echo "${REGENCY_NAME:-}" | xargs)
+
+            # Skip baris kosong
+            [ -z "$PROV_CODE" ] && continue
+
+            if [ -z "$REGENCY_CODE" ]; then
+              CODE_FIELD="kode_provinsi"
+              CODE_VALUE="$PROV_CODE"
+              TAG="prov"
+            else
+              CODE_FIELD="kode_kab_kota"
+              CODE_VALUE="$REGENCY_CODE"
+              TAG="kabkota"
+            fi
+
+            DEST="out/raw/${TAG}_${PROV_CODE}_${REGENCY_CODE:-00}.json"
+            echo "→ $TAG $PROV_CODE ${REGENCY_CODE:-''} ($PROV_NAME ${REGENCY_NAME:-''})"
+
+            # Hit endpoint "perbandingan harga"
+            RESP=$(curl -sS --max-time 30 \
+              -H 'Origin: https://sp2kp.kemendag.go.id' \
+              -H 'Referer: https://sp2kp.kemendag.go.id/' \
+              -F "tanggal=$DATE" \
+              -F "tanggal_pembanding=$COMPARE_DATE" \
+              -F "$CODE_FIELD=$CODE_VALUE" \
+              'https://api-sp2kp.kemendag.go.id/report/api/average-price/generate-perbandingan-harga' \
+            ) || true
+
+            # Simpan raw JSON
+            echo "${RESP:-{}}" > "$DEST"
+
+            # Ekstrak ke CSV (kalau data ada)
+            echo "$RESP" | jq -r \
+              --arg pc "$PROV_CODE" --arg pn "$PROV_NAME" \
+              --arg rc "${REGENCY_CODE:-}" --arg rn "${REGENCY_NAME:-}" '
+              .data // [] | .[] |
+              [
+                $pc, $pn, $rc, $rn,
+                .tanggal, .harga,
+                .tanggal_pembanding, .harga_pembanding,
+                .delta_harga, .persen_perubahan, .status_perubahan,
+                .variant_id, .variant_nama, .satuan_display
+              ] | @csv
+            ' >> "$CSV"
+          done
+
+          echo "Selesai. File gabungan: $CSV"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: prices-${{ github.run_number }}
+          path: out/
